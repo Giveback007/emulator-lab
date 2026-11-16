@@ -29,6 +29,16 @@ export ANDROID_AVD_HOME="$HOME/.android/avd"
 mkdir -p "$ANDROID_AVD_HOME"
 env | grep -E '^ANDROID|^JAVA_HOME' | sort > "$EVIDENCE/env.txt"
 echo no | "$BIN/avdmanager" create avd -n test -k "$IMAGE" -d pixel_6 --force > "$EVIDENCE/avd-create.txt" 2>&1 || { log "FAIL create avd; see avd-create.txt"; exit 1; }
+# DATA_SIZE: a smaller phone storage. The 2-CPU runner's disk is small: the test image asked for 7.4 GB
+# with 3.7 GB free and the emulator quit (private probe 11-16).
+# The first try appended a second "2G" line and the emulator still asked for 6 GB (real run 1): replace the line
+# avdmanager wrote, in bytes, and keep what the file says.
+cfg="$ANDROID_AVD_HOME/test.avd/config.ini"
+if [ -n "${DATA_SIZE:-}" ]; then
+    sed -i '/^disk\.dataPartition\.size/d' "$cfg"
+    echo "disk.dataPartition.size=$DATA_SIZE" >> "$cfg"
+fi
+log "disk: $(df -h --output=avail "$HOME" | tail -1 | tr -d ' ') free; config: $(grep -i '^disk\.dataPartition' "$cfg" | tr '\n' ' ')"
 avds=$("$SDK/emulator/emulator" -list-avds 2>&1 | tr '\n' ' ')
 log "avds: $avds"
 case " $avds " in *" test "*) ;; *) log "FAIL phone not where the emulator looks; see avd-create.txt, env.txt"; ls -la "$ANDROID_AVD_HOME" >> "$EVIDENCE/avd-create.txt" 2>&1; exit 1;; esac
@@ -72,7 +82,9 @@ while [ $(( $(date +%s) - t1 )) -lt "$BOOT_LIMIT" ]; do
     fi
     if [ "$logcat_started" = 0 ] && [ "$(timeout 5 "$ADB" get-state 2>>"$EVIDENCE/adb-errors.txt")" = device ]; then
         # The phone keeps its log from the start of boot, so streaming it from here misses nothing.
-        "$ADB" logcat -v time > "$EVIDENCE/logcat.txt" 2>&1 &
+        # boot-logcat.txt: the checks write their own logcat.txt afterwards.
+        "$ADB" logcat -v time > "$EVIDENCE/boot-logcat.txt" 2>&1 &
+        logcat_pid=$!
         logcat_started=1
         log "adb up, logcat streaming"
     fi
@@ -82,6 +94,7 @@ while [ $(( $(date +%s) - t1 )) -lt "$BOOT_LIMIT" ]; do
         snapshot
         log "webview: $("$ADB" shell pm list packages 2>>"$EVIDENCE/adb-errors.txt" | grep -i webview | tr -d '\r' | tr '\n' ' ')"
         "$ADB" shell dumpsys webviewupdate 2>>"$EVIDENCE/adb-errors.txt" | head -20 > "$EVIDENCE/webview.txt"
+        if [ "$logcat_started" = 1 ]; then kill "$logcat_pid" 2>/dev/null; fi
         exit 0
     fi
     sleep 3
