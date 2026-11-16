@@ -19,12 +19,14 @@ jobs:
         tag: [google_apis]
         cpus: [2]
         try: [1]
+        room: [fake, none]
     env:
       EVIDENCE: ${{ github.workspace }}/probe-evidence
       BOOT_LIMIT: 480
       PIN_CPUS: ${{ matrix.cpus != 'all' && matrix.cpus || '' }}
-      DATA_SIZE: 2147483648
-      RESULT: probe-${{ matrix.tag }}-cpus${{ matrix.cpus }}-${{ matrix.try }}
+      LEAVE_MB: 4500
+      FAKE_ROOM_GB: ${{ matrix.room == 'fake' && '20' || '' }}
+      RESULT: probe-${{ matrix.tag }}-room-${{ matrix.room }}
     steps:
       - uses: actions/checkout@v4
       - name: Enable KVM
