@@ -27,6 +27,21 @@ log "accel: $("$SDK/emulator/emulator" -accel-check 2>&1 | tr '\n' ' ' | cut -c1
 # One phone folder for both tools: the first probe's phone was created where the emulator did not look.
 export ANDROID_AVD_HOME="$HOME/.android/avd"
 mkdir -p "$ANDROID_AVD_HOME"
+# LEAVE_MB: fill the disk until only this much is free, to stand in for the private runner (4.7 GB in real run 1).
+if [ -n "${LEAVE_MB:-}" ]; then
+    avail=$(df -m --output=avail / | tail -1 | tr -d ' ')
+    sudo fallocate -l "$(( avail - LEAVE_MB ))M" /filler || { log "FAIL filler"; exit 1; }
+    log "filled: $(df -h --output=avail / | tail -1) free on /"
+fi
+# FAKE_ROOM_GB: the phone folder on a sparse disk image that reports this much free, so the emulator's
+# 7.4 GB free-space check passes; only what the phone really writes takes real space.
+if [ -n "${FAKE_ROOM_GB:-}" ]; then
+    sudo truncate -s "${FAKE_ROOM_GB}G" /avd.img && sudo mkfs.ext4 -q -F /avd.img &&
+        sudo mount -o loop /avd.img "$ANDROID_AVD_HOME" && sudo chown "$(id -u):$(id -g)" "$ANDROID_AVD_HOME" ||
+        { log "FAIL fake room"; exit 1; }
+    log "fake room: $(df -h --output=avail "$ANDROID_AVD_HOME" | tail -1) free in phone folder"
+fi
+room() { log "real use: / $(df -h --output=avail / | tail -1) free; avd.img $(du -h /avd.img 2>/dev/null | cut -f1) real"; }
 env | grep -E '^ANDROID|^JAVA_HOME' | sort > "$EVIDENCE/env.txt"
 echo no | "$BIN/avdmanager" create avd -n test -k "$IMAGE" -d pixel_6 --force > "$EVIDENCE/avd-create.txt" 2>&1 || { log "FAIL create avd; see avd-create.txt"; exit 1; }
 # DATA_SIZE: a smaller phone storage. The 2-CPU runner's disk is small: the test image asked for 7.4 GB
@@ -80,7 +95,7 @@ logcat_started=0
 last=0
 while [ $(( $(date +%s) - t1 )) -lt "$BOOT_LIMIT" ]; do
     if ! kill -0 "$emu" 2>/dev/null; then
-        wait "$emu"; log "FAIL emulator exited (code $?) after $(( $(date +%s) - t1 ))s; see emulator.log"
+        wait "$emu"; log "FAIL emulator exited (code $?) after $(( $(date +%s) - t1 ))s; see emulator.log"; room
         exit 1
     fi
     if [ "$logcat_started" = 0 ] && [ "$(timeout 5 "$ADB" get-state 2>>"$EVIDENCE/adb-errors.txt")" = device ]; then
@@ -94,6 +109,7 @@ while [ $(( $(date +%s) - t1 )) -lt "$BOOT_LIMIT" ]; do
     if [ $(( $(date +%s) - last )) -ge 30 ]; then snapshot; last=$(date +%s); fi
     if [ "$(timeout 5 "$ADB" shell getprop sys.boot_completed 2>>"$EVIDENCE/adb-errors.txt" | tr -d '\r')" = 1 ]; then
         log "BOOTED in $(( $(date +%s) - t1 ))s after emulator start"
+        room
         snapshot
         log "webview: $("$ADB" shell pm list packages 2>>"$EVIDENCE/adb-errors.txt" | grep -i webview | tr -d '\r' | tr '\n' ' ')"
         "$ADB" shell dumpsys webviewupdate 2>>"$EVIDENCE/adb-errors.txt" | head -20 > "$EVIDENCE/webview.txt"
