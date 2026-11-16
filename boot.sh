@@ -38,7 +38,10 @@ if [ -n "${DATA_SIZE:-}" ]; then
     sed -i '/^disk\.dataPartition\.size/d' "$cfg"
     echo "disk.dataPartition.size=$DATA_SIZE" >> "$cfg"
 fi
-log "disk: $(df -h --output=avail "$HOME" | tail -1 | tr -d ' ') free; config: $(grep -i '^disk\.dataPartition' "$cfg" | tr '\n' ' ')"
+log "disk: $(df -h --output=target,avail / /mnt 2>/dev/null | tail -n +2 | tr -s " " | tr "\n" ";") config: $(grep -i "^disk\.dataPartition" "$cfg" | tr "\n" " ")"
+# The config line alone was ignored (lab 17b1936: config 2147483648, emulator still made 6g); the flag in MB too.
+SIZE_FLAG=()
+if [ -n "${DATA_SIZE:-}" ]; then SIZE_FLAG=(-partition-size "$(( DATA_SIZE / 1048576 ))"); fi
 avds=$("$SDK/emulator/emulator" -list-avds 2>&1 | tr '\n' ' ')
 log "avds: $avds"
 case " $avds " in *" test "*) ;; *) log "FAIL phone not where the emulator looks; see avd-create.txt, env.txt"; ls -la "$ANDROID_AVD_HOME" >> "$EVIDENCE/avd-create.txt" 2>&1; exit 1;; esac
@@ -51,7 +54,7 @@ if [ -n "${PIN_CPUS:-}" ]; then PIN=(taskset -c "0-$(( PIN_CPUS - 1 ))"); log "e
 # adb's server runs before the phone starts, so the phone registers with it (probe 2: "Unable to connect to adb daemon").
 log "plain adb on PATH: $(command -v adb || echo none); using $("$ADB" version 2>&1 | head -1)"
 "$ADB" start-server >> "$EVIDENCE/adb-errors.txt" 2>&1 || { log "FAIL adb server did not start; see adb-errors.txt"; exit 1; }
-"${PIN[@]}" "$SDK/emulator/emulator" -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none \
+"${PIN[@]}" "$SDK/emulator/emulator" -avd test "${SIZE_FLAG[@]}" -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none \
     -verbose -show-kernel > "$EVIDENCE/emulator.log" 2>&1 &
 emu=$!
 t1=$(date +%s)
