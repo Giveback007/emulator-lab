@@ -11,13 +11,15 @@ BIN="$SDK/cmdline-tools/latest/bin"
 IMAGE="system-images;android-34;$TAG;x86_64"
 mkdir -p "$EVIDENCE"
 t0=$(date +%s)
+# The script's own errors (a bad setting, a missing tool) go to the evidence too, not only to the job log.
+exec 2> >(tee -a "$EVIDENCE/stderr.txt" >&2)
 log() { echo "$(( $(date +%s) - t0 ))s $*" | tee -a "$EVIDENCE/boot.txt"; }
 
 log "host: $(nproc) cpus, $(free -m | awk '/^Mem:/{print $2" MB ram, "$7" MB free"}'), kvm: $(ls -l /dev/kvm 2>&1)"
 yes | "$BIN/sdkmanager" --licenses > /dev/null 2>&1
 "$BIN/sdkmanager" emulator platform-tools > "$EVIDENCE/sdk-install.txt" 2>&1 || { log "FAIL install emulator"; exit 1; }
 "$BIN/sdkmanager" "$IMAGE" >> "$EVIDENCE/sdk-install.txt" 2>&1 || { log "FAIL install $IMAGE"; exit 1; }
-log "installed $IMAGE, emulator $("$SDK/emulator/emulator" -version 2>/dev/null | head -1)"
+log "installed $IMAGE, emulator $("$SDK/emulator/emulator" -version 2>&1 | head -1)"
 log "accel: $("$SDK/emulator/emulator" -accel-check 2>&1 | tr '\n' ' ' | cut -c1-200)"
 echo no | "$BIN/avdmanager" create avd -n test -k "$IMAGE" -d pixel_6 --force > /dev/null 2>&1 || { log "FAIL create avd"; exit 1; }
 
