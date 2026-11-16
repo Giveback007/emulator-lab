@@ -1,0 +1,47 @@
+name: emulator boot probe
+
+# Boot only. Compares the full image with the lighter test image (ATD), on all 4 CPUs of the
+# public runner and pinned to 2 (standing in for the private-repo runner), twice each.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [google_apis, aosp_atd]
+        cpus: [all, 2]
+        try: [1, 2]
+    env:
+      EVIDENCE: ${{ github.workspace }}/probe-evidence
+      BOOT_LIMIT: 480
+      PIN_CPUS: ${{ matrix.cpus == 'all' && '' || matrix.cpus }}
+      RESULT: probe-${{ matrix.tag }}-cpus${{ matrix.cpus }}-${{ matrix.try }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Boot
+        run: bash boot.sh ${{ matrix.tag }}
+      - name: Report and publish evidence
+        if: always()
+        run: |
+          mkdir -p "$EVIDENCE" && cd "$EVIDENCE"
+          if [ -f emulator.log ]; then tail -n 3000 emulator.log > e.tail && mv e.tail emulator.log; fi
+          if [ -f logcat.txt ]; then tail -n 5000 logcat.txt > l.tail && mv l.tail logcat.txt; fi
+          # Annotations are readable through the API; the boot log's last lines say how it went.
+          echo "::notice title=$RESULT::$(tail -n 4 boot.txt 2>/dev/null | tr '\n' ' ' | cut -c1-900)"
+          echo "${{ github.sha }}" > commit.txt
+          git init -q && git checkout -q -b "$RESULT" && git add -A
+          git -c user.name=emulator -c user.email=emulator@localhost commit -q -m "$RESULT for ${{ github.sha }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$RESULT"
