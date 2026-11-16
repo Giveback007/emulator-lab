@@ -21,7 +21,14 @@ yes | "$BIN/sdkmanager" --licenses > /dev/null 2>&1
 "$BIN/sdkmanager" "$IMAGE" >> "$EVIDENCE/sdk-install.txt" 2>&1 || { log "FAIL install $IMAGE"; exit 1; }
 log "installed $IMAGE, emulator $("$SDK/emulator/emulator" -version 2>&1 | head -1)"
 log "accel: $("$SDK/emulator/emulator" -accel-check 2>&1 | tr '\n' ' ' | cut -c1-200)"
-echo no | "$BIN/avdmanager" create avd -n test -k "$IMAGE" -d pixel_6 --force > /dev/null 2>&1 || { log "FAIL create avd"; exit 1; }
+# One phone folder for both tools: the first probe's phone was created where the emulator did not look.
+export ANDROID_AVD_HOME="$HOME/.android/avd"
+mkdir -p "$ANDROID_AVD_HOME"
+env | grep -E '^ANDROID|^JAVA_HOME' | sort > "$EVIDENCE/env.txt"
+echo no | "$BIN/avdmanager" create avd -n test -k "$IMAGE" -d pixel_6 --force > "$EVIDENCE/avd-create.txt" 2>&1 || { log "FAIL create avd; see avd-create.txt"; exit 1; }
+avds=$("$SDK/emulator/emulator" -list-avds 2>&1 | tr '\n' ' ')
+log "avds: $avds"
+case " $avds " in *" test "*) ;; *) log "FAIL phone not where the emulator looks; see avd-create.txt, env.txt"; ls -la "$ANDROID_AVD_HOME" >> "$EVIDENCE/avd-create.txt" 2>&1; exit 1;; esac
 
 # PIN_CPUS: keep the emulator on that many CPUs, to stand in for the 2-CPU private-repo runner.
 PIN=()
