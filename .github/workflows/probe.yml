@@ -37,8 +37,6 @@ jobs:
         if: always()
         run: |
           mkdir -p "$EVIDENCE" && cd "$EVIDENCE"
-          if [ -f emulator.log ]; then tail -n 3000 emulator.log > e.tail && mv e.tail emulator.log; fi
-          if [ -f logcat.txt ]; then tail -n 5000 logcat.txt > l.tail && mv l.tail logcat.txt; fi
           # Annotations are readable through the API; the boot log's last lines say how it went.
           echo "::notice title=$RESULT::$(tail -n 4 boot.txt 2>/dev/null | tr '\n' ' ' | cut -c1-900)"
           echo "${{ github.sha }}" > commit.txt

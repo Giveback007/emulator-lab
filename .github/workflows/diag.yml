@@ -1,0 +1,37 @@
+name: diagnosis check
+
+# A boot that fails on purpose (75 s limit, a full boot takes longer), to check that the evidence
+# alone shows how far the phone got and why it stopped, before we rely on it for real failures.
+on:
+  push:
+    branches: [diag]
+
+permissions:
+  contents: write
+
+jobs:
+  fail-on-purpose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      EVIDENCE: ${{ github.workspace }}/probe-evidence
+      BOOT_LIMIT: 75
+      RESULT: diag-result
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Boot (expected to fail at 75 s)
+        run: bash boot.sh google_apis
+      - name: Report and publish evidence
+        if: always()
+        run: |
+          mkdir -p "$EVIDENCE" && cd "$EVIDENCE"
+          echo "::notice title=$RESULT::$(tail -n 4 boot.txt 2>/dev/null | tr '\n' ' ' | cut -c1-900)"
+          echo "${{ github.sha }}" > commit.txt
+          git init -q && git checkout -q -b "$RESULT" && git add -A
+          git -c user.name=emulator -c user.email=emulator@localhost commit -q -m "$RESULT for ${{ github.sha }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$RESULT"

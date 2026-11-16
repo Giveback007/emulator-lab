@@ -24,20 +24,47 @@ echo no | "$BIN/avdmanager" create avd -n test -k "$IMAGE" -d pixel_6 --force > 
 # PIN_CPUS: keep the emulator on that many CPUs, to stand in for the 2-CPU private-repo runner.
 PIN=()
 if [ -n "${PIN_CPUS:-}" ]; then PIN=(taskset -c "0-$(( PIN_CPUS - 1 ))"); log "emulator pinned to $PIN_CPUS cpus"; fi
-"${PIN[@]}" "$SDK/emulator/emulator" -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none > "$EVIDENCE/emulator.log" 2>&1 &
+# -verbose and -show-kernel: emulator.log also holds the emulator's own steps and the phone's kernel console,
+# which is the only record when the phone never gets far enough for adb.
+"${PIN[@]}" "$SDK/emulator/emulator" -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none \
+    -verbose -show-kernel > "$EVIDENCE/emulator.log" 2>&1 &
+emu=$!
 t1=$(date +%s)
 log "emulator started"
-last=""
-beat=0
+mkdir -p "$EVIDENCE/shots"
+
+# Where the phone is in its boot: each stage sets a property once it is done.
+stage() {
+    timeout 5 adb shell getprop 2>/dev/null | tr -d '\r' |
+        grep -E '\[(init.svc.(servicemanager|surfaceflinger|zygote|bootanim)|sys.boot_completed|dev.bootcomplete|sys.sysctl.extra_free_kbytes)\]' |
+        sed 's/[][]//g; s/: /=/' | tr '\n' ' '
+}
+
+# Every 30 s: boot stage, host load and the busiest host processes, and a screenshot once adb is up.
+snapshot() {
+    local t=$(( $(date +%s) - t1 ))
+    log "adb=$(timeout 5 adb get-state 2>/dev/null || echo none) $(stage) load=$(cut -d' ' -f1-3 /proc/loadavg)"
+    { echo "== ${t}s"; top -b -n1 -o %CPU | sed -n '7,12p'; } >> "$EVIDENCE/host.txt"
+    timeout 10 adb exec-out screencap -p > "$EVIDENCE/shots/${t}s.png" 2>/dev/null || rm -f "$EVIDENCE/shots/${t}s.png"
+}
+
+logcat_started=0
+last=0
 while [ $(( $(date +%s) - t1 )) -lt "$BOOT_LIMIT" ]; do
-    state="adb=$(timeout 5 adb get-state 2>/dev/null || echo none) boot_completed=$(timeout 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
-    if [ "$state" != "$last" ] || [ $(( $(date +%s) - beat )) -ge 30 ]; then
-        log "$state load=$(cut -d' ' -f1-3 /proc/loadavg)"
-        last=$state
-        beat=$(date +%s)
+    if ! kill -0 "$emu" 2>/dev/null; then
+        wait "$emu"; log "FAIL emulator exited (code $?) after $(( $(date +%s) - t1 ))s; see emulator.log"
+        exit 1
     fi
-    if [[ $state == *boot_completed=1 ]]; then
+    if [ "$logcat_started" = 0 ] && [ "$(timeout 5 adb get-state 2>/dev/null)" = device ]; then
+        # The phone keeps its log from the start of boot, so streaming it from here misses nothing.
+        adb logcat -v time > "$EVIDENCE/logcat.txt" 2>&1 &
+        logcat_started=1
+        log "adb up, logcat streaming"
+    fi
+    if [ $(( $(date +%s) - last )) -ge 30 ]; then snapshot; last=$(date +%s); fi
+    if [ "$(timeout 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
         log "BOOTED in $(( $(date +%s) - t1 ))s after emulator start"
+        snapshot
         log "webview: $(adb shell pm list packages 2>/dev/null | grep -i webview | tr -d '\r' | tr '\n' ' ')"
         adb shell dumpsys webviewupdate 2>/dev/null | head -20 > "$EVIDENCE/webview.txt"
         exit 0
@@ -45,5 +72,6 @@ while [ $(( $(date +%s) - t1 )) -lt "$BOOT_LIMIT" ]; do
     sleep 3
 done
 log "FAIL boot not completed ${BOOT_LIMIT}s after emulator start"
-timeout 20 adb logcat -d -v time > "$EVIDENCE/logcat.txt" 2>&1
+snapshot
+{ echo "== dmesg"; sudo dmesg | tail -n 40; } >> "$EVIDENCE/host.txt"
 exit 1
