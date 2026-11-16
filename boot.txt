@@ -1,0 +1,13 @@
+0s host: 4 cpus, 15701 MB ram, 14810 MB free, kvm: crw-rw-rw- 1 root kvm 10, 232 Nov 16 06:35 /dev/kvm
+44s installed system-images;android-34;google_apis;x86_64, emulator /usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/qemu-system-x86_64: error while loading shared libraries: libpulse.so.0: cannot open shared object file: No such file or directory
+44s accel: accel: 0 KVM (version 12) is installed and usable. accel 
+45s avds: test 
+45s emulator pinned to 2 cpus
+45s plain adb on PATH: none; using Android Debug Bridge version 1.0.41
+45s emulator started
+45s adb=none  load=1.04 0.37 0.15
+61s adb up, logcat streaming
+76s adb=device init.svc.bootanim=stopped init.svc.servicemanager=running init.svc.surfaceflinger=running init.svc.zygote=running sys.sysctl.extra_free_kbytes=30375  load=1.50 0.54 0.22
+86s BOOTED in 41s after emulator start
+86s adb=device dev.bootcomplete=1 init.svc.bootanim=stopped init.svc.servicemanager=running init.svc.surfaceflinger=running init.svc.zygote=running sys.boot_completed=1 sys.sysctl.extra_free_kbytes=30375  load=2.10 0.70 0.27
+87s webview: package:com.google.android.overlay.googlewebview package:com.google.android.webview 
